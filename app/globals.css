@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 43 50% 97%;
+    --foreground: 218 34% 14%;
+    --border: 35 25% 80%;
+    --input: 35 25% 80%;
+    --ring: 173 77% 27%;
+    --primary: 173 77% 27%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 26 89% 57%;
+    --secondary-foreground: 220 50% 10%;
+    --muted: 40 36% 93%;
+    --muted-foreground: 216 13% 37%;
+    --accent: 8 71% 60%;
+    --accent-foreground: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 218 34% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 218 34% 14%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply text-foreground;
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(circle at 10% 10%, rgba(245, 158, 11, 0.22), transparent 28%),
+      radial-gradient(circle at 92% 22%, rgba(13, 148, 136, 0.22), transparent 34%),
+      linear-gradient(150deg, rgba(255, 252, 246, 0.95), rgba(245, 249, 250, 0.94));
+    min-height: 100vh;
+    font-family: var(--font-body), sans-serif;
+    letter-spacing: 0.01em;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading), sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .animate-float {
+    animation: float 8s ease-in-out infinite;
+  }
+
+  .app-bg {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .app-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(120deg, rgba(15, 118, 110, 0.08), rgba(249, 115, 22, 0.05)),
+      linear-gradient(rgba(79, 70, 229, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 229, 0.03) 1px, transparent 1px);
+    background-size: 100% 100%, 28px 28px, 28px 28px;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .surface-card {
+    @apply rounded-3xl border bg-white/90 shadow-xl;
+    border-color: #e9dcc6;
+    box-shadow:
+      0 10px 30px rgba(16, 24, 40, 0.08),
+      0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .gold-ring {
+    box-shadow: 0 0 0 1px rgba(198, 143, 64, 0.38);
+  }
+
+  .section-title {
+    @apply text-2xl font-semibold;
+    color: #142332;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
