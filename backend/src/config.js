@@ -18,6 +18,8 @@ export const config = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017',
   mongoDbName: process.env.MONGODB_DB_NAME || 'ai_vaom',
   mongoOrdersCollection: process.env.MONGODB_ORDERS_COLLECTION || 'orders',
+  pythonExecutable: String(process.env.PYTHON_EXECUTABLE || '').trim(),
+  enablePythonBrowserOpen: String(process.env.ENABLE_PYTHON_BROWSER_OPEN || 'true').trim().toLowerCase() !== 'false',
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '20kb',
   rateLimitWindowMs: toPositiveInt(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
   rateLimitMaxRequests: toPositiveInt(process.env.RATE_LIMIT_MAX_REQUESTS, 300),

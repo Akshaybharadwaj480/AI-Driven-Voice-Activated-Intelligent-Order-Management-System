@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "voice:assistant": "python voice_assistant.py",
     "test": "vitest run",
     "test:watch": "vitest"
   },

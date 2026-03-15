@@ -66,8 +66,24 @@ function parseModifyProduct(command) {
   return cleanupProductName(match[1]);
 }
 
+function parseBrowseProduct(command) {
+  const pattern =
+    /(?:want|need|looking\s+for|search(?:\s+for)?|find|show\s+me|open)\s+([a-z0-9][a-z0-9\s\-]{1,80}?)(?:\s+from\s+(amazon|flipkart)|\s+on\s+(amazon|flipkart)|$)/i;
+  const match = command.match(pattern);
+
+  if (!match) {
+    return null;
+  }
+
+  return cleanupProductName(match[1]);
+}
+
 function detectIntent(command) {
   const text = command.toLowerCase();
+  const hasExistingOrderContext =
+    /(order\s*(id|number)\s*(ord[-\s]?\d+|\d+)|order\s*(ord[-\s]?\d+|\d+)|\bord[-\s]?\d+\b|\bmy\s+order\b)/.test(
+      text,
+    );
 
   if (/(complete|finish|mark\s+completed).*(order)/.test(text)) {
     return { intent: 'complete_order', confidence: 0.93 };
@@ -81,7 +97,10 @@ function detectIntent(command) {
     return { intent: 'cancel_order', confidence: 0.95 };
   }
 
-  if (/(where is|track|locate|find).*(order)/.test(text)) {
+  if (
+    /(where is|track|locate).*(order)/.test(text) ||
+    (/(track|where is|locate|find)\b/.test(text) && hasExistingOrderContext)
+  ) {
     return { intent: 'track_order', confidence: 0.93 };
   }
 
@@ -93,12 +112,23 @@ function detectIntent(command) {
     return { intent: 'modify_order', confidence: 0.9 };
   }
 
+  if (/\border\s+(?!status\b)(?:a|an|my\s+)?[a-z0-9]/.test(text) && !hasExistingOrderContext) {
+    return { intent: 'create_order', confidence: 0.93 };
+  }
+
   if (/(buy|purchase)\s+[a-z0-9]/.test(text)) {
     return { intent: 'create_order', confidence: 0.93 };
   }
 
   if (/(create|place|make|new).*(order)/.test(text)) {
     return { intent: 'create_order', confidence: 0.94 };
+  }
+
+  if (
+    /(want|need|looking\s+for|search(?:\s+for)?|find|show\s+me|open).*[a-z0-9]/.test(text) &&
+    !/(cancel|abort|delete|track|status|modify|update|change|complete|finish).*(order)/.test(text)
+  ) {
+    return { intent: 'browse_product', confidence: 0.89 };
   }
 
   return { intent: 'unknown', confidence: 0.4 };
@@ -127,8 +157,13 @@ export function detectVoiceIntent(command) {
   const intentData = detectIntent(command);
   const productFromCreate = parseCreateProduct(command);
   const productFromModify = parseModifyProduct(command);
+  const productFromBrowse = parseBrowseProduct(command);
   const intentAwareProduct =
-    intentData.intent === 'modify_order' ? productFromModify || productFromCreate : productFromCreate;
+    intentData.intent === 'modify_order'
+      ? productFromModify || productFromCreate || productFromBrowse
+      : intentData.intent === 'browse_product'
+        ? productFromBrowse || productFromCreate
+        : productFromCreate || productFromBrowse;
 
   return {
     ...intentData,

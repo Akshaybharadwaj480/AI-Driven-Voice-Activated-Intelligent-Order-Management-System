@@ -33,7 +33,12 @@ function openTrustedShoppingUrl(url: string | null | undefined) {
       return;
     }
 
-    window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+    const popup = window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+
+    // Fallback for browsers that block async popups in speech callbacks.
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      window.location.assign(parsed.toString());
+    }
   } catch {
     // Ignore malformed URLs.
   }
@@ -44,11 +49,50 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [assistantResponse, setAssistantResponse] = useState('Listening for command...');
+  const [microphonePermission, setMicrophonePermission] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [assistantResponse, setAssistantResponse] = useState('Click Resume and allow microphone access to start voice commands.');
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>([]);
   const recognitionRef = useRef<any>(null);
+  const recognitionActiveRef = useRef(false);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const microphonePermissionRef = useRef<'unknown' | 'granted' | 'denied'>('unknown');
   const shouldKeepListeningRef = useRef(true);
   const lastProcessedRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
+
+  useEffect(() => {
+    microphonePermissionRef.current = microphonePermission;
+  }, [microphonePermission]);
+
+  const createHistoryId = (command: string) => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+
+    const normalizedCommand = command.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 24);
+    return `${Date.now()}-${normalizedCommand || 'voice'}`;
+  };
+
+  const requestMicrophoneAccessAndStart = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setError('Microphone API is not available in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setMicrophonePermission('granted');
+      shouldKeepListeningRef.current = true;
+      setError(null);
+      startListening();
+    } catch {
+      shouldKeepListeningRef.current = false;
+      setMicrophonePermission('denied');
+      setIsListening(false);
+      setAssistantResponse('Microphone access is required for voice commands.');
+      setError('Microphone permission denied. Allow microphone access in your browser settings and click Enable Mic.');
+    }
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -67,6 +111,13 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
     recognitionRef.current.continuous = true;
     recognitionRef.current.interimResults = true;
     recognitionRef.current.lang = 'en-US';
+
+    recognitionRef.current.onstart = () => {
+      recognitionActiveRef.current = true;
+      setIsListening(true);
+      setError(null);
+      setAssistantResponse('Listening for command...');
+    };
 
     recognitionRef.current.onresult = async (event: any) => {
       const current = event.resultIndex;
@@ -91,32 +142,85 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
     };
 
     recognitionRef.current.onerror = (event: any) => {
+      const errorCode = event?.error;
+      const permissionDenied = errorCode === 'not-allowed' || errorCode === 'service-not-allowed';
+
       const message =
-        event?.error === 'not-allowed'
+        permissionDenied
           ? 'Microphone permission denied. Please allow microphone access.'
-          : event?.error === 'no-speech'
-            ? 'No speech detected. Try speaking clearly near the microphone.'
-            : 'Microphone access denied or not available';
+          : errorCode === 'audio-capture'
+            ? 'No microphone device detected. Connect a microphone and try again.'
+            : errorCode === 'network'
+              ? 'Speech recognition network issue. Please try again.'
+              : errorCode === 'no-speech'
+                ? 'No speech detected. Try speaking clearly near the microphone.'
+                : 'Microphone access denied or not available';
+
+      if (permissionDenied) {
+        shouldKeepListeningRef.current = false;
+        setMicrophonePermission('denied');
+      }
+
+      if (errorCode === 'audio-capture') {
+        shouldKeepListeningRef.current = false;
+      }
+
+      if (errorCode === 'aborted') {
+        return;
+      }
+
       setError(message);
       setIsListening(false);
     };
 
     recognitionRef.current.onend = () => {
+      recognitionActiveRef.current = false;
       setIsListening(false);
 
-      if (shouldKeepListeningRef.current) {
-        setTimeout(() => {
+      if (shouldKeepListeningRef.current && microphonePermissionRef.current !== 'denied') {
+        if (restartTimerRef.current) {
+          clearTimeout(restartTimerRef.current);
+        }
+
+        restartTimerRef.current = setTimeout(() => {
           if (shouldKeepListeningRef.current) {
             startListening();
           }
-        }, 250);
+        }, 450);
       }
     };
 
-    startListening();
+    if (navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: 'microphone' as PermissionName })
+        .then((status) => {
+          if (status.state === 'granted') {
+            setMicrophonePermission('granted');
+          } else if (status.state === 'denied') {
+            setMicrophonePermission('denied');
+          }
+
+          status.onchange = () => {
+            if (status.state === 'granted') {
+              setMicrophonePermission('granted');
+            } else if (status.state === 'denied') {
+              setMicrophonePermission('denied');
+            } else {
+              setMicrophonePermission('unknown');
+            }
+          };
+        })
+        .catch(() => {
+          // Permission query unsupported in some browsers.
+        });
+    }
 
     return () => {
       shouldKeepListeningRef.current = false;
+      recognitionActiveRef.current = false;
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+      }
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
@@ -124,7 +228,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
   }, []);
 
   const startListening = () => {
-    if (!recognitionRef.current) {
+    if (!recognitionRef.current || recognitionActiveRef.current) {
       return;
     }
 
@@ -133,19 +237,23 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
 
     try {
       recognitionRef.current.start();
-      setIsListening(true);
-      setAssistantResponse('Listening for command...');
+      setMicrophonePermission('granted');
     } catch {
-      setError('Unable to start microphone listening');
+      setError('Unable to start microphone listening. Click Enable Mic and try again.');
       setIsListening(false);
     }
   };
 
   const stopListening = () => {
     shouldKeepListeningRef.current = false;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
+    recognitionActiveRef.current = false;
     setIsListening(false);
     setAssistantResponse('Voice assistant paused. Click resume to continue.');
   };
@@ -167,7 +275,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
       setAssistantResponse(result.spokenResponse);
       setCommandHistory((previous) => {
         const nextItem: CommandHistoryItem = {
-          id: `${Date.now()}`,
+          id: createHistoryId(command),
           command,
           response: result.spokenResponse,
           createdAt: Date.now(),
@@ -212,18 +320,19 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
           </span>
           <button
             type="button"
-            onClick={isListening ? stopListening : startListening}
+            onClick={isListening ? stopListening : requestMicrophoneAccessAndStart}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
             {isListening ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-            {isListening ? 'Pause' : 'Resume'}
+            {isListening ? 'Pause' : microphonePermission === 'denied' ? 'Enable Mic' : 'Resume'}
           </button>
         </div>
       </div>
 
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {transcript && (
           <motion.div
+            key="transcript"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -237,6 +346,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
 
         {assistantResponse && (
           <motion.div
+            key="assistant-response"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -251,6 +361,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
 
         {isProcessing && (
           <motion.div
+            key="processing"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -263,6 +374,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
 
         {error && (
           <motion.div
+            key="error"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -289,7 +401,7 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
         ) : (
           <div className="space-y-2">
             {commandHistory.map((item) => (
-              <div key={item.id} className="rounded-md border border-slate-200 bg-white p-2">
+              <div key={`${item.id}-${item.createdAt}`} className="rounded-md border border-slate-200 bg-white p-2">
                 <p className="text-sm font-medium text-slate-800">{item.command}</p>
                 <p className="text-xs text-slate-600">{item.response}</p>
                 <p className="mt-1 text-[11px] text-slate-400">
@@ -306,7 +418,13 @@ export default function VoiceCommand({ onCommand, onStatsUpdate }: VoiceCommandP
           <Volume2 className="w-4 h-4 mr-1" />
           <span>Voice feedback enabled</span>
         </div>
-        <span>Listening...</span>
+        <span>
+          {isListening
+            ? 'Listening...'
+            : microphonePermission === 'denied'
+              ? 'Microphone blocked'
+              : 'Microphone idle'}
+        </span>
       </div>
     </motion.div>
   );

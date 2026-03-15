@@ -18,6 +18,7 @@ import {
   sanitizeProductName,
   sanitizeVoiceCommand,
 } from '../utils/requestValidation.js';
+import { openWithPythonWebbrowser } from '../services/pythonBrowserLauncher.js';
 
 const router = Router();
 
@@ -67,6 +68,44 @@ router.post('/', async (req, res) => {
   const nlp = detectVoiceIntent(safeCommand);
   const { intent, entities } = nlp;
 
+  if (intent === 'browse_product') {
+    const safeProductName = sanitizeProductName(entities.productName, '');
+    const safePlatform = sanitizePlatform(entities.platform);
+    const openUrl = buildSearchUrl(safePlatform, safeProductName);
+
+    if (!openUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please mention both a product and platform (Amazon or Flipkart).',
+      });
+    }
+
+    const order = await createOrder({
+      customerName: sanitizeCustomerName(entities.customerName),
+      productName: safeProductName,
+      platform: safePlatform,
+      items: normalizeItems(entities.items),
+    });
+
+    const browserResult = await openWithPythonWebbrowser(openUrl);
+    const openMessage = browserResult.opened
+      ? ` Opening ${platformLabel(safePlatform)} in your browser.`
+      : ` Could not auto-open browser from backend, but the link is ready.`;
+
+    const orders = await listOrders();
+    return res.json({
+      success: true,
+      intent,
+      confidence: nlp.confidence,
+      responseText: `Order ${order.id} saved. Searching ${safeProductName} on ${platformLabel(safePlatform)}.${openMessage}`,
+      openUrl,
+      order,
+      browserOpened: browserResult.opened,
+      orders,
+      stats: computeStats(orders),
+    });
+  }
+
   if (intent === 'create_order') {
     const safeProductName = sanitizeProductName(entities.productName, entities.items?.[0]?.name || 'generic product');
     const safePlatform = sanitizePlatform(entities.platform);
@@ -78,9 +117,13 @@ router.post('/', async (req, res) => {
       items: normalizeItems(entities.items),
     });
 
-    const openUrl = buildSearchUrl(safePlatform, safeProductName);
+    const openUrl = buildSearchUrl(order.platform, order.productName);
     const platformResponse = openUrl
-      ? ` Opening ${platformLabel(safePlatform)} to search for the product.`
+      ? ` Opening ${platformLabel(order.platform)} to search for the product.`
+      : '';
+    const browserResult = openUrl ? await openWithPythonWebbrowser(openUrl) : { opened: false };
+    const browserResponse = openUrl && !browserResult.opened
+      ? ' Could not auto-open browser from backend, but the link is ready.'
       : '';
 
     const orders = await listOrders();
@@ -88,8 +131,9 @@ router.post('/', async (req, res) => {
       success: true,
       intent,
       confidence: nlp.confidence,
-      responseText: `Your order has been created successfully. Order ID is ${order.id}.${platformResponse}`,
+      responseText: `Your order has been created successfully. Order ID is ${order.id}.${platformResponse}${browserResponse}`,
       openUrl,
+      browserOpened: Boolean(browserResult.opened),
       order,
       orders,
       stats: computeStats(orders),
@@ -115,9 +159,13 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ success: false, message: `Order ${normalizeOrderId(targetOrderId)} not found` });
     }
 
-    const openUrl = buildSearchUrl(safePlatform, safeProductName);
+    const openUrl = buildSearchUrl(updated.platform, updated.productName);
     const platformResponse = openUrl
-      ? ` Opening ${platformLabel(safePlatform)} to search for the product.`
+      ? ` Opening ${platformLabel(updated.platform)} to search for the product.`
+      : '';
+    const browserResult = openUrl ? await openWithPythonWebbrowser(openUrl) : { opened: false };
+    const browserResponse = openUrl && !browserResult.opened
+      ? ' Could not auto-open browser from backend, but the link is ready.'
       : '';
 
     const orders = await listOrders();
@@ -125,8 +173,9 @@ router.post('/', async (req, res) => {
       success: true,
       intent,
       confidence: nlp.confidence,
-      responseText: `Your order has been updated successfully.${platformResponse}`,
+      responseText: `Your order has been updated successfully.${platformResponse}${browserResponse}`,
       openUrl,
+      browserOpened: Boolean(browserResult.opened),
       order: updated,
       orders,
       stats: computeStats(orders),
@@ -144,12 +193,18 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ success: false, message: `Order ${normalizeOrderId(targetOrderId)} not found` });
     }
 
+    const openUrl = buildSearchUrl(order.platform, order.productName);
+    const platformResponse = openUrl
+      ? ` Opening ${platformLabel(order.platform)} product search.`
+      : '';
+
     const orders = await listOrders();
     return res.json({
       success: true,
       intent,
       confidence: nlp.confidence,
-      responseText: `Order ${order.id} status is ${order.status}. ${getStatusLabel(order.status)}.`,
+      responseText: `Order ${order.id} status is ${order.status}. ${getStatusLabel(order.status)}.${platformResponse}`,
+      openUrl,
       order,
       orders,
       stats: computeStats(orders),
