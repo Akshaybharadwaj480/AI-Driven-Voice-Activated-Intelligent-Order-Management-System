@@ -7,7 +7,7 @@ function toPositiveInt(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const frontendOrigins = String(process.env.FRONTEND_ORIGIN || 'http://localhost:3000')
+const frontendOrigins = String(process.env.FRONTEND_ORIGIN || 'http://localhost:3000,http://localhost:3001')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
